@@ -11,13 +11,38 @@ try:
 except ImportError:
     SOUND = False
 
+# Stonowany szary — mniej męczy oczy niż jasne #f2f2f2 (szczególnie na TV)
+BG_COLOR = "#484848"
+BG_SHADOW = "#333333"
+TEXT_COLOR = "#E8E8E8"
+TEXT_MUTED = "#AAAAAA"
+
+# Pastelowe kolory paska postępu
+PROGRESS_GREEN = "#88CE98"
+PROGRESS_ORANGE = "#E99E58"
+PROGRESS_RED = "#EB6C6C"
+
+MONITORINFOF_PRIMARY = 1
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
 
 def get_monitors():
-    """Zwraca listę monitorów (Windows): left, top, right, bottom, width, height."""
+    """Zwraca listę monitorów z flagą primary (Windows)."""
     monitors = []
 
     def callback(hMonitor, hdcMonitor, lprcMonitor, dwData):
-        rect = lprcMonitor.contents
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        ctypes.windll.user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi))
+        rect = mi.rcMonitor
         monitors.append({
             "left": rect.left,
             "top": rect.top,
@@ -25,6 +50,7 @@ def get_monitors():
             "bottom": rect.bottom,
             "width": rect.right - rect.left,
             "height": rect.bottom - rect.top,
+            "primary": bool(mi.dwFlags & MONITORINFOF_PRIMARY),
         })
         return 1
 
@@ -39,17 +65,44 @@ def get_monitors():
     return monitors
 
 
+def pick_monitors(monitors):
+    """Panel na monitorze głównym, tarcza na drugim (nie-głównym) ekranie."""
+    fallback = {"left": 0, "top": 0, "width": 1920, "height": 1080, "primary": True}
+    if not monitors:
+        return fallback, fallback
+
+    primary = next((m for m in monitors if m["primary"]), monitors[0])
+    others = [m for m in monitors if not m["primary"]]
+    secondary = others[0] if others else primary
+    return primary, secondary
+
+
+def place_fullscreen_on_monitor(window, monitor):
+    """
+    Pełny ekran na wybranym monitorze.
+    attributes('-fullscreen') w tkinter zawsze trafia na ekran główny — używamy geometry.
+    """
+    window.overrideredirect(False)
+    window.geometry(
+        f"{monitor['width']}x{monitor['height']}"
+        f"+{monitor['left']}+{monitor['top']}"
+    )
+    window.update_idletasks()
+    window.overrideredirect(True)
+    window.lift()
+
+
 class AnalogTimer:
 
     def __init__(self):
         monitors = get_monitors()
-        primary = monitors[0] if monitors else {"left": 0, "top": 0, "width": 1920, "height": 1080}
-        secondary = monitors[1] if len(monitors) > 1 else primary
+        primary, secondary = pick_monitors(monitors)
+        self.clock_monitor = secondary
 
         # ===== Okno sterowania (ekran komputera) =====
         self.control_root = tk.Tk()
         self.control_root.title("Analog Timer — panel sterowania")
-        self.control_root.configure(bg="#f2f2f2")
+        self.control_root.configure(bg=BG_COLOR)
         self.control_root.resizable(False, False)
 
         panel_w, panel_h = 620, 120
@@ -57,13 +110,14 @@ class AnalogTimer:
         panel_y = primary["top"] + (primary["height"] - panel_h) // 2
         self.control_root.geometry(f"{panel_w}x{panel_h}+{panel_x}+{panel_y}")
 
-        controls = tk.Frame(self.control_root, bg="#f2f2f2", padx=15, pady=15)
+        controls = tk.Frame(self.control_root, bg=BG_COLOR, padx=15, pady=15)
         controls.pack(fill="both", expand=True)
 
         tk.Label(
             controls,
             text="Czas:",
-            bg="#f2f2f2",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
             font=("Segoe UI", 11),
         ).grid(row=0, column=0, padx=5)
 
@@ -80,7 +134,8 @@ class AnalogTimer:
         tk.Label(
             controls,
             text="min",
-            bg="#f2f2f2",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
             font=("Segoe UI", 11),
         ).grid(row=0, column=2)
 
@@ -105,35 +160,28 @@ class AnalogTimer:
             command=self.reset,
         ).grid(row=0, column=5, padx=5)
 
-        screen_label = "telewizor" if len(monitors) > 1 else "ten sam ekran (brak drugiego monitora)"
+        screen_label = (
+            f"monitor {monitors.index(secondary) + 1} ({secondary['width']}×{secondary['height']})"
+            if len(monitors) > 1
+            else "ten sam ekran (brak drugiego monitora)"
+        )
         tk.Label(
             controls,
             text=f"Tarcza zegara: {screen_label}",
-            bg="#f2f2f2",
+            bg=BG_COLOR,
             font=("Segoe UI", 9),
-            fg="#555555",
+            fg=TEXT_MUTED,
         ).grid(row=1, column=0, columnspan=6, pady=(10, 0))
 
         # ===== Okno tarczy (drugi ekran / TV) =====
         self.clock_root = tk.Toplevel(self.control_root)
         self.clock_root.title("Analog Timer — tarcza")
-        self.clock_root.configure(bg="#f2f2f2")
+        self.clock_root.configure(bg=BG_COLOR)
         self.clock_root.protocol("WM_DELETE_WINDOW", self._on_clock_close)
-
-        self.clock_root.geometry(
-            f"{secondary['width']}x{secondary['height']}"
-            f"+{secondary['left']}+{secondary['top']}"
-        )
-        self.clock_root.update_idletasks()
-        self.clock_root.attributes("-fullscreen", True)
-        self.clock_root.bind(
-            "<Escape>",
-            lambda e: self.clock_root.attributes("-fullscreen", False),
-        )
 
         self.canvas = tk.Canvas(
             self.clock_root,
-            bg="#f2f2f2",
+            bg=BG_COLOR,
             highlightthickness=0,
         )
         self.canvas.pack(expand=True, fill="both")
@@ -150,6 +198,8 @@ class AnalogTimer:
         self.pause_time = 0
 
         self.draw_clock()
+        # Po zmapowaniu okna — pełny ekran na drugim monitorze (nie przez -fullscreen)
+        self.clock_root.after_idle(lambda: place_fullscreen_on_monitor(self.clock_root, secondary))
 
     def _on_clock_close(self):
         self.clock_root.withdraw()
@@ -171,7 +221,7 @@ class AnalogTimer:
         self.canvas.create_oval(
             cx - r + 6, cy - r + 8,
             cx + r + 6, cy + r + 8,
-            fill="#d7d7d7",
+            fill=BG_SHADOW,
             outline="",
         )
 
@@ -183,25 +233,28 @@ class AnalogTimer:
             width=2,
         )
 
-        elapsed = self.total_seconds - self.remaining
-        fraction = elapsed / self.total_seconds if self.total_seconds else 0
+        remaining_fraction = (
+            self.remaining / self.total_seconds if self.total_seconds else 0
+        )
+        elapsed_fraction = 1 - remaining_fraction
 
-        if fraction < 0.50:
-            progress_color = "#5CB85C"
-        elif fraction < 0.80:
-            progress_color = "#F0AD4E"
+        if remaining_fraction > 0.50:
+            progress_color = PROGRESS_GREEN
+        elif remaining_fraction > 0.20:
+            progress_color = PROGRESS_ORANGE
         else:
-            progress_color = "#D9534F"
+            progress_color = PROGRESS_RED
 
         # Szeroki pierścień postępu na zewnątrz; biała tarcza z kreskami w środku
         ring_width = max(36, int(r * 0.34))
         face_r = r - ring_width
 
+        # Luka rośnie zgodnie z ruchem wskazówek (od 12 w prawo)
         self.canvas.create_arc(
             cx - r, cy - r,
             cx + r, cy + r,
-            start=90,
-            extent=-360 * fraction,
+            start=90 - 360 * elapsed_fraction,
+            extent=-360 * remaining_fraction,
             fill=progress_color,
             outline="",
         )
