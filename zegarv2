@@ -302,12 +302,12 @@ class AnalogTimer:
             fill="#222222",
         )
 
-        self.canvas.create_text(
-            cx, cy + 48,
-            text="POZOSTAŁO",
-            font=("Segoe UI", int(self.radius / 18)),
-            fill="#777777",
-        )
+        #self.canvas.create_text(
+        #    cx, cy + 48,
+        #    text="POZOSTAŁO",
+        #    font=("Segoe UI", int(self.radius / 18)),
+        #    fill="#777777",
+        #)
 
     def update(self):
         if not self.running:
